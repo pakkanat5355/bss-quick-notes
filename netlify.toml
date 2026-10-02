@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+
+# Allow the page to be embedded in Grafana via <iframe>
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "frame-ancestors *"
+    X-Frame-Options = ""

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITSD Quick Notes</title>
+<style>
+  :root {
+    --bg: #111217; --panel: #181b1f; --panel2: #22252b; --border: #2c3235;
+    --text: #ccccdc; --muted: #8e8e9e; --accent: #3d71d9;
+    --high: #f2495c; --med: #ff9830; --low: #73bf69;
+    --open: #5794f2; --prog: #ff9830; --done: #73bf69;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.4 Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { padding: 12px 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .bar h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
+  .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .chip { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 10px; border-radius: 14px; cursor: pointer; font-size: 12px; }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip .n { opacity: .75; margin-left: 4px; }
+  input, select, button { font: inherit; color: var(--text); background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 3px; padding: 5px 8px; }
+  input:focus, select:focus { outline: 1px solid var(--accent); }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .spacer { flex: 1; }
+  form.add { display: grid; grid-template-columns: 1fr 110px 120px 140px 130px auto; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border); padding: 8px; border-radius: 4px; margin-bottom: 10px; }
+  @media (max-width: 760px) { form.add { grid-template-columns: 1fr 1fr; } form.add .note { grid-column: 1 / -1; } }
+  .tbl-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; min-width: 640px; }
+  th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sorted::after { content: attr(data-dir); margin-left: 4px; }
+  tr:hover td { background: #1f2227; }
+  td.note { white-space: pre-wrap; word-break: break-word; width: 50%; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #111; }
+  .p-High { background: var(--high); } .p-Medium { background: var(--med); } .p-Low { background: var(--low); }
+  select.st { padding: 2px 4px; font-size: 12px; border-width: 0 0 0 3px; }
+  select.st.s-Open { border-left-color: var(--open); }
+  select.st.s-InProgress { border-left-color: var(--prog); }
+  select.st.s-Done { border-left-color: var(--done); }
+  tr.done td.note { color: var(--muted); text-decoration: line-through; }
+  .act button { padding: 2px 6px; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
+  .act button:hover { color: var(--text); border-color: var(--border); }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <h1>ITSD Quick Notes</h1>
+    <div class="chips" id="chips"></div>
+    <span class="spacer"></span>
+    <input id="search" type="search" placeholder="Search note / owner…">
+    <button id="exportBtn" title="Download notes as JSON">Export</button>
+    <button id="importBtn" title="Load notes from JSON">Import</button>
+    <input id="importFile" type="file" accept=".json" hidden>
+  </div>
+
+  <form class="add" id="addForm">
+    <input class="note" name="note" placeholder="New note…" required>
+    <select name="priority">
+      <option>High</option><option selected>Medium</option><option>Low</option>
+    </select>
+    <select name="status">
+      <option selected>Open</option><option>In Progress</option><option>Done</option>
+    </select>
+    <input name="owner" placeholder="Owner" required>
+    <input name="create_date" type="date" required>
+    <button class="primary" type="submit">Add</button>
+  </form>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-key="note">Note</th>
+          <th data-key="priority">Priority</th>
+          <th data-key="status">Status</th>
+          <th data-key="owner">Owner</th>
+          <th data-key="create_date">Create Date</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No notes match this filter.</div>
+  </div>
+  <p class="muted" id="footer"></p>
+</div>
+
+<script>
+(function () {
+  const KEY = 'itsd-quick-notes-v1';
+  const STATUSES = ['Open', 'In Progress', 'Done'];
+  const PRIO_RANK = { High: 0, Medium: 1, Low: 2 };
+  const STATUS_RANK = { Open: 0, 'In Progress': 1, Done: 2 };
+
+  let notes = load();
+  let filter = 'All';
+  let sort = { key: 'priority', dir: 1 };
+
+  const $ = (s) => document.querySelector(s);
+  const today = () => new Date().toISOString().slice(0, 10);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+  }
+
+  function compare(a, b) {
+    const k = sort.key;
+    let va = a[k], vb = b[k];
+    if (k === 'priority') { va = PRIO_RANK[va]; vb = PRIO_RANK[vb]; }
+    if (k === 'status') { va = STATUS_RANK[va]; vb = STATUS_RANK[vb]; }
+    if (va < vb) return -sort.dir;
+    if (va > vb) return sort.dir;
+    return (b.create_date || '').localeCompare(a.create_date || '');
+  }
+
+  function renderChips() {
+    const counts = { All: notes.length };
+    STATUSES.forEach((s) => counts[s] = notes.filter((n) => n.status === s).length);
+    $('#chips').innerHTML = ['All', ...STATUSES].map((s) =>
+      `<button class="chip ${s === filter ? 'active' : ''}" data-s="${s}">${s}<span class="n">${counts[s]}</span></button>`
+    ).join('');
+  }
+
+  function render() {
+    renderChips();
+    const q = $('#search').value.trim().toLowerCase();
+    const list = notes
+      .filter((n) => filter === 'All' || n.status === filter)
+      .filter((n) => !q || n.note.toLowerCase().includes(q) || n.owner.toLowerCase().includes(q))
+      .sort(compare);
+
+    $('#rows').innerHTML = list.map((n) => `
+      <tr class="${n.status === 'Done' ? 'done' : ''}" data-id="${n.id}">
+        <td class="note">${esc(n.note)}</td>
+        <td><span class="badge p-${n.priority}">${n.priority}</span></td>
+        <td><select class="st s-${n.status.replace(/ /g, "")}" data-act="status">
+          ${STATUSES.map((s) => `<option ${s === n.status ? 'selected' : ''}>${s}</option>`).join('')}
+        </select></td>
+        <td>${esc(n.owner)}</td>
+        <td>${esc(n.create_date)}</td>
+        <td class="act"><button data-act="del" title="Delete">✕</button></td>
+      </tr>`).join('');
+    $('#empty').hidden = list.length > 0;
+
+    document.querySelectorAll('th[data-key]').forEach((th) => {
+      const on = th.dataset.key === sort.key;
+      th.classList.toggle('sorted', on);
+      th.dataset.dir = on ? (sort.dir === 1 ? '▲' : '▼') : '';
+    });
+    $('#footer').textContent = `Showing ${list.length} of ${notes.length} notes · saved in this browser`;
+  }
+
+  // Add note
+  const form = $('#addForm');
+  form.create_date.value = today();
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    notes.push({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      note: f.get('note').trim(),
+      priority: f.get('priority'),
+      status: f.get('status'),
+      owner: f.get('owner').trim(),
+      create_date: f.get('create_date'),
+    });
+    save();
+    form.note.value = '';
+    form.note.focus();
+    render();
+  });
+
+  // Status filter
+  $('#chips').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    filter = b.dataset.s;
+    render();
+  });
+
+  $('#search').addEventListener('input', render);
+
+  // Sort
+  document.querySelectorAll('th[data-key]').forEach((th) => th.addEventListener('click', () => {
+    sort = { key: th.dataset.key, dir: sort.key === th.dataset.key ? -sort.dir : 1 };
+    render();
+  }));
+
+  // Row actions: change status, delete (click twice to confirm)
+  $('#rows').addEventListener('change', (e) => {
+    if (e.target.dataset.act !== 'status') return;
+    const n = notes.find((x) => x.id === e.target.closest('tr').dataset.id);
+    n.status = e.target.value;
+    save(); render();
+  });
+  $('#rows').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act="del"]');
+    if (!b) return;
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Delete?'; b.style.color = 'var(--high)';
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '✕'; b.style.color = ''; } }, 2500);
+      return;
+    }
+    const id = b.closest('tr').dataset.id;
+    notes = notes.filter((x) => x.id !== id);
+    save(); render();
+  });
+
+  // Export / Import JSON (to share or back up notes)
+  $('#exportBtn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `itsd-notes-${today()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $('#importBtn').addEventListener('click', () => $('#importFile').click());
+  $('#importFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data)) throw new Error('not an array');
+      notes = data.map((n, i) => ({ id: n.id || 'imp' + i + Date.now().toString(36), ...n }));
+      save(); render();
+    } catch (err) {
+      $('#footer').textContent = 'Import failed: invalid JSON file';
+    }
+    e.target.value = '';
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -9,7 +9,7 @@
     --bg: #111217; --panel: #181b1f; --panel2: #22252b; --border: #2c3235;
     --text: #ccccdc; --muted: #8e8e9e; --accent: #3d71d9;
     --high: #f2495c; --med: #ff9830; --low: #73bf69;
-    --open: #5794f2; --prog: #ff9830; --done: #73bf69;
+    --open: #5794f2; --done: #73bf69;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -45,7 +45,6 @@
   .p-High { background: var(--high); } .p-Medium { background: var(--med); } .p-Low { background: var(--low); }
   select.st { padding: 2px 4px; font-size: 12px; border-width: 0 0 0 3px; }
   select.st.s-Open { border-left-color: var(--open); }
-  select.st.s-In-Progress { border-left-color: var(--prog); }
   select.st.s-Completed { border-left-color: var(--done); }
   tr.done td.note { color: var(--muted); text-decoration: line-through; }
   .act button { padding: 2px 6px; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
@@ -72,7 +71,7 @@
       <option>High</option><option selected>Medium</option><option>Low</option>
     </select>
     <select name="status">
-      <option selected>Open</option><option>In-Progress</option><option>Completed</option>
+      <option selected>Open</option><option>Completed</option>
     </select>
     <input name="owner" placeholder="Owner" required>
     <input name="create_date" type="date" required>
@@ -105,11 +104,11 @@
   if (zoom >= 0.3 && zoom <= 4) document.body.style.zoom = zoom;
 
   const KEY = 'itsd-quick-notes-v1';
-  const STATUSES = ['Open', 'In-Progress', 'Completed'];
+  const STATUSES = ['Open', 'Completed'];
   const PRIO_RANK = { High: 0, Medium: 1, Low: 2 };
-  const STATUS_RANK = { Open: 0, 'In-Progress': 1, Completed: 2 };
+  const STATUS_RANK = { Open: 0, Completed: 1 };
   // Map old status names from earlier versions / imported files
-  const LEGACY = { 'In Progress': 'In-Progress', Done: 'Completed' };
+  const LEGACY = { 'In Progress': 'Open', 'In-Progress': 'Open', Done: 'Completed' };
   const migrate = (list) => list.map((n) => ({ ...n, status: LEGACY[n.status] || n.status }));
 
   let notes = load();

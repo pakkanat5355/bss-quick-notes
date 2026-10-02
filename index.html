@@ -100,6 +100,10 @@
 
 <script>
 (function () {
+  // Zoom via URL, e.g. ?zoom=1.5 (150%) or ?zoom=0.8 (80%) — handy in a Grafana iframe
+  const zoom = parseFloat(new URLSearchParams(location.search).get('zoom'));
+  if (zoom >= 0.3 && zoom <= 4) document.body.style.zoom = zoom;
+
   const KEY = 'itsd-quick-notes-v1';
   const STATUSES = ['Open', 'In Progress', 'Done'];
   const PRIO_RANK = { High: 0, Medium: 1, Low: 2 };

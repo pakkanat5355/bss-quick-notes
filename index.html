@@ -45,8 +45,8 @@
   .p-High { background: var(--high); } .p-Medium { background: var(--med); } .p-Low { background: var(--low); }
   select.st { padding: 2px 4px; font-size: 12px; border-width: 0 0 0 3px; }
   select.st.s-Open { border-left-color: var(--open); }
-  select.st.s-InProgress { border-left-color: var(--prog); }
-  select.st.s-Done { border-left-color: var(--done); }
+  select.st.s-In-Progress { border-left-color: var(--prog); }
+  select.st.s-Completed { border-left-color: var(--done); }
   tr.done td.note { color: var(--muted); text-decoration: line-through; }
   .act button { padding: 2px 6px; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
   .act button:hover { color: var(--text); border-color: var(--border); }
@@ -57,7 +57,7 @@
 <body>
 <div class="wrap">
   <div class="bar">
-    <h1>ITSD Quick Notes <span class="high-badge" id="highBadge" title="High priority notes not yet Done"></span></h1>
+    <h1>ITSD Quick Notes <span class="high-badge" id="highBadge" title="High priority notes not yet Completed"></span></h1>
     <div class="chips" id="chips"></div>
     <span class="spacer"></span>
     <input id="search" type="search" placeholder="Search note / owner…">
@@ -72,7 +72,7 @@
       <option>High</option><option selected>Medium</option><option>Low</option>
     </select>
     <select name="status">
-      <option selected>Open</option><option>In Progress</option><option>Done</option>
+      <option selected>Open</option><option>In-Progress</option><option>Completed</option>
     </select>
     <input name="owner" placeholder="Owner" required>
     <input name="create_date" type="date" required>
@@ -105,9 +105,12 @@
   if (zoom >= 0.3 && zoom <= 4) document.body.style.zoom = zoom;
 
   const KEY = 'itsd-quick-notes-v1';
-  const STATUSES = ['Open', 'In Progress', 'Done'];
+  const STATUSES = ['Open', 'In-Progress', 'Completed'];
   const PRIO_RANK = { High: 0, Medium: 1, Low: 2 };
-  const STATUS_RANK = { Open: 0, 'In Progress': 1, Done: 2 };
+  const STATUS_RANK = { Open: 0, 'In-Progress': 1, Completed: 2 };
+  // Map old status names from earlier versions / imported files
+  const LEGACY = { 'In Progress': 'In-Progress', Done: 'Completed' };
+  const migrate = (list) => list.map((n) => ({ ...n, status: LEGACY[n.status] || n.status }));
 
   let notes = load();
   let filter = 'All';
@@ -119,13 +122,16 @@
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   function load() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
+    try { return migrate(JSON.parse(localStorage.getItem(KEY)) || []); } catch (e) { return []; }
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
   }
 
   function compare(a, b) {
+    // Completed notes always sink to the bottom
+    const ca = a.status === 'Completed', cb = b.status === 'Completed';
+    if (ca !== cb) return ca ? 1 : -1;
     const k = sort.key;
     let va = a[k], vb = b[k];
     if (k === 'priority') { va = PRIO_RANK[va]; vb = PRIO_RANK[vb]; }
@@ -145,7 +151,7 @@
 
   function render() {
     renderChips();
-    const high = notes.filter((n) => n.priority === 'High' && n.status !== 'Done').length;
+    const high = notes.filter((n) => n.priority === 'High' && n.status !== 'Completed').length;
     $('#highBadge').textContent = `High ${high}`;
     $('#highBadge').classList.toggle('zero', high === 0);
     const q = $('#search').value.trim().toLowerCase();
@@ -155,10 +161,10 @@
       .sort(compare);
 
     $('#rows').innerHTML = list.map((n) => `
-      <tr class="${n.status === 'Done' ? 'done' : ''}" data-id="${n.id}">
+      <tr class="${n.status === 'Completed' ? 'done' : ''}" data-id="${n.id}">
         <td class="note">${esc(n.note)}</td>
         <td><span class="badge p-${n.priority}">${n.priority}</span></td>
-        <td><select class="st s-${n.status.replace(/ /g, "")}" data-act="status">
+        <td><select class="st s-${n.status}" data-act="status">
           ${STATUSES.map((s) => `<option ${s === n.status ? 'selected' : ''}>${s}</option>`).join('')}
         </select></td>
         <td>${esc(n.owner)}</td>
@@ -247,7 +253,7 @@
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data)) throw new Error('not an array');
-      notes = data.map((n, i) => ({ id: n.id || 'imp' + i + Date.now().toString(36), ...n }));
+      notes = migrate(data).map((n, i) => ({ id: n.id || 'imp' + i + Date.now().toString(36), ...n }));
       save(); render();
     } catch (err) {
       $('#footer').textContent = 'Import failed: invalid JSON file';

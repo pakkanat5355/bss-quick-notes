@@ -111,7 +111,10 @@
   const LEGACY = { 'In Progress': 'Open', 'In-Progress': 'Open', Done: 'Completed' };
   const migrate = (list) => list.map((n) => ({ ...n, status: LEGACY[n.status] || n.status }));
 
-  let notes = load();
+  const API = '/api/notes';
+  let notes = [];
+  let loaded = false;
+  let lastError = '';
   let filter = 'All';
   let sort = { key: 'priority', dir: 1 };
 
@@ -120,11 +123,51 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  function load() {
-    try { return migrate(JSON.parse(localStorage.getItem(KEY)) || []); } catch (e) { return []; }
+  async function api(method, path = '', body) {
+    const res = await fetch(API + path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    return data;
   }
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {}
+
+  // Load shared notes from the server
+  async function refresh() {
+    try {
+      notes = await api('GET');
+      loaded = true;
+      lastError = '';
+    } catch (e) {
+      lastError = 'Cannot load notes: ' + e.message;
+    }
+    render();
+  }
+
+  // Apply a change locally right away, then save to the server; reload on failure
+  async function persist(fn) {
+    try {
+      await fn();
+      lastError = '';
+    } catch (e) {
+      lastError = 'Save failed: ' + e.message;
+      await refresh();
+    }
+    render();
+  }
+
+  // One-time: push notes saved in this browser by the old version up to the server
+  async function migrateLocal() {
+    let local = [];
+    try { local = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return; }
+    if (!local.length) return;
+    try {
+      await api('PUT', '', migrate(local));
+      localStorage.removeItem(KEY);
+    } catch (e) { /* keep local copy, try again next load */ }
   }
 
   function compare(a, b) {
@@ -170,14 +213,16 @@
         <td>${esc(n.create_date)}</td>
         <td class="act"><button data-act="del" title="Delete">✕</button></td>
       </tr>`).join('');
-    $('#empty').hidden = list.length > 0;
 
     document.querySelectorAll('th[data-key]').forEach((th) => {
       const on = th.dataset.key === sort.key;
       th.classList.toggle('sorted', on);
       th.dataset.dir = on ? (sort.dir === 1 ? '▲' : '▼') : '';
     });
-    $('#footer').textContent = `Showing ${list.length} of ${notes.length} notes · saved in this browser`;
+    $('#empty').textContent = loaded ? 'No notes match this filter.' : 'Loading…';
+    $('#empty').hidden = list.length > 0;
+    $('#footer').textContent = lastError ||
+      `Showing ${list.length} of ${notes.length} notes · shared with team · updated ${new Date().toLocaleTimeString()}`;
   }
 
   // Add note
@@ -186,18 +231,19 @@
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const f = new FormData(form);
-    notes.push({
+    const n = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       note: f.get('note').trim(),
       priority: f.get('priority'),
       status: f.get('status'),
       owner: f.get('owner').trim(),
       create_date: f.get('create_date'),
-    });
-    save();
+    };
+    notes.push(n);
     form.note.value = '';
     form.note.focus();
     render();
+    persist(() => api('PUT', '/' + n.id, n));
   });
 
   // Status filter
@@ -221,7 +267,8 @@
     if (e.target.dataset.act !== 'status') return;
     const n = notes.find((x) => x.id === e.target.closest('tr').dataset.id);
     n.status = e.target.value;
-    save(); render();
+    render();
+    persist(() => api('PUT', '/' + n.id, n));
   });
   $('#rows').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act="del"]');
@@ -233,7 +280,8 @@
     }
     const id = b.closest('tr').dataset.id;
     notes = notes.filter((x) => x.id !== id);
-    save(); render();
+    render();
+    persist(() => api('DELETE', '/' + id));
   });
 
   // Export / Import JSON (to share or back up notes)
@@ -252,15 +300,20 @@
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data)) throw new Error('not an array');
-      notes = migrate(data).map((n, i) => ({ id: n.id || 'imp' + i + Date.now().toString(36), ...n }));
-      save(); render();
+      const items = migrate(data).map((n, i) => ({ ...n, id: n.id || 'imp' + i + Date.now().toString(36) }));
+      await api('PUT', '', items);
+      await refresh();
     } catch (err) {
-      $('#footer').textContent = 'Import failed: invalid JSON file';
+      lastError = 'Import failed: ' + err.message;
+      render();
     }
     e.target.value = '';
   });
 
   render();
+  migrateLocal().then(refresh);
+  // Keep the Grafana panel up to date with teammates' changes
+  setInterval(() => { if (!document.hidden) refresh(); }, 30000);
 })();
 </script>
 </body>
